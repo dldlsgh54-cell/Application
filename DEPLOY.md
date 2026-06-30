@@ -127,12 +127,18 @@ app/build/outputs/apk/debug/app-debug.apk
 폰에서 받는 순서:
 
 1. 폰 브라우저에서 GitHub 저장소를 엽니다.
-2. `Actions` 탭으로 이동합니다.
-3. 가장 최근 `Build Android Debug APK` 실행 항목을 엽니다.
-4. 화면 아래 `Artifacts`에서 `shorts-auto-debug-apk`를 다운로드합니다.
-5. 다운로드된 zip을 압축 해제합니다.
-6. `app-debug.apk`를 실행합니다.
-7. `알 수 없는 앱 설치 허용`을 켠 뒤 설치합니다.
+2. `Releases`를 엽니다.
+3. `Latest Debug APK`를 엽니다.
+4. `Assets`에서 `app-debug.apk`를 다운로드합니다.
+5. `app-debug.apk`를 실행합니다.
+6. `알 수 없는 앱 설치 허용`을 켠 뒤 설치합니다.
+
+Release가 아직 안 보이면 Actions 빌드가 끝나지 않은 상태입니다. 이때는 아래 순서로 확인합니다.
+
+1. `Actions` 탭으로 이동합니다.
+2. 가장 최근 `Build Android Debug APK` 실행 항목을 엽니다.
+3. 초록 체크가 뜰 때까지 기다립니다.
+4. 다시 `Releases`에서 `Latest Debug APK`를 확인합니다.
 
 GitHub 앱보다 Chrome/삼성 인터넷 같은 브라우저에서 여는 편이 APK 다운로드와 압축 해제가 더 편합니다.
 
