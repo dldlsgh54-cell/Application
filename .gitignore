@@ -1,6 +1,7 @@
 .gradle/
 .idea/
 node_modules/
+.chatgpt-profile/
 *.iml
 local.properties
 build/
