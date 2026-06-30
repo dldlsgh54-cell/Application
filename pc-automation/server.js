@@ -243,11 +243,13 @@ async function submitPrompt(prompt) {
   await page.waitForTimeout(3000);
 }
 
-async function waitUntilGenerationSettles() {
+async function waitUntilGenerationSettles(index, total) {
   const start = Date.now();
   let stableChecks = 0;
   while (Date.now() - start < 240000) {
     await waitIfPaused();
+    const elapsed = Math.floor((Date.now() - start) / 1000);
+    progressMessage = `프롬프트 ${index}/${total} 이미지 생성 대기 중 (${elapsed}초)`;
     const stopVisible = await page.locator([
       "button:has-text('Stop')",
       "button:has-text('중지')",
@@ -292,7 +294,7 @@ async function tryDownloadLatestImages(projectDir, index) {
   return saved;
 }
 
-async function runAutomation({ projectName, prompts, batchMode }) {
+async function runAutomation({ projectName, prompts }) {
   if (running) throw new Error("이미 실행 중입니다.");
   running = true;
   paused = false;
@@ -310,23 +312,15 @@ async function runAutomation({ projectName, prompts, batchMode }) {
       throw new Error("ChatGPT 탭에 연결되지 않았습니다.");
     }
 
-    if (batchMode) {
-      const combined = buildBatchPrompt(prompts);
-      setProgress(`${prompts.length}개 이미지를 한 번에 요청합니다.`);
-      await submitPrompt(combined);
-      await waitUntilGenerationSettles();
-      setProgress("통합 생성 완료. 이미지 다운로드는 진행하지 않습니다.");
-    } else {
-      for (let i = 0; i < prompts.length; i++) {
-        await waitIfPaused();
-        setProgress(`프롬프트 ${i + 1}/${prompts.length} 입력 및 전송 중`);
-        await submitPrompt(prompts[i]);
-        setProgress(`프롬프트 ${i + 1}/${prompts.length} 이미지 생성 대기 중`);
-        const settled = await waitUntilGenerationSettles();
-        if (!settled) log(`프롬프트 ${i + 1} 대기 시간 초과`);
-        setProgress(`프롬프트 ${i + 1}/${prompts.length} 완료. 다운로드는 진행하지 않습니다.`);
-        await page.waitForTimeout(2000);
-      }
+    for (let i = 0; i < prompts.length; i++) {
+      await waitIfPaused();
+      setProgress(`프롬프트 ${i + 1}/${prompts.length} 입력 및 전송 중`);
+      await submitPrompt(prompts[i]);
+      setProgress(`프롬프트 ${i + 1}/${prompts.length} 이미지 생성 대기 중`);
+      const settled = await waitUntilGenerationSettles(i + 1, prompts.length);
+      if (!settled) log(`프롬프트 ${i + 1} 대기 시간 초과`);
+      setProgress(`프롬프트 ${i + 1}/${prompts.length} 완료. 다운로드는 진행하지 않습니다.`);
+      await page.waitForTimeout(2000);
     }
 
     setProgress(`작업 완료. 저장 폴더: ${projectDir}`);
@@ -372,8 +366,7 @@ app.post("/api/run", async (req, res) => {
   if (!prompts.length) return res.status(400).json({ ok: false, error: "프롬프트가 없습니다." });
   runAutomation({
     projectName: req.body.projectName,
-    prompts,
-    batchMode: Boolean(req.body.batchMode)
+    prompts
   }).catch((error) => log(`오류: ${error.message}`));
   res.json({ ok: true });
 });

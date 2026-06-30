@@ -7,31 +7,33 @@
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f7fb; color: #172033; }
-    main { width: min(1080px, 100%); margin: 0 auto; padding: 18px; }
+    main { width: min(1180px, 100%); margin: 0 auto; padding: 18px; }
     h1 { margin: 0 0 8px; font-size: clamp(24px, 5vw, 34px); letter-spacing: 0; }
     p { margin: 0; color: #667085; line-height: 1.45; }
     section { background: #fff; border: 1px solid #d9e0ea; border-radius: 8px; padding: 14px; margin: 12px 0; }
     label { display: block; font-weight: 700; margin-bottom: 8px; }
     input, textarea, select { width: 100%; border: 1px solid #d9e0ea; border-radius: 8px; padding: 11px 12px; font: inherit; background: #fff; }
     textarea { min-height: 120px; resize: vertical; line-height: 1.45; }
-    .source { min-height: 180px; }
-    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-    .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     button { border: 1px solid transparent; border-radius: 8px; min-height: 42px; padding: 9px 13px; font: inherit; font-weight: 700; cursor: pointer; background: #0f766e; color: white; }
     button.secondary { background: #fff; color: #172033; border-color: #d9e0ea; }
+    .window-title { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 12px; }
+    .two-pane { display: grid; grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.4fr); gap: 12px; align-items: start; }
+    .prompt-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-height: 680px; overflow: auto; padding-right: 4px; }
+    .prompt-grid section { margin: 0; background: #f8fafc; }
+    .prompt-grid textarea { min-height: 96px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .settings-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
     .row { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
     .log { white-space: pre-wrap; background: #101828; color: #f9fafb; border-radius: 8px; padding: 12px; min-height: 150px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; overflow: auto; }
-    .option { display: flex; align-items: center; gap: 8px; color: #344054; font-weight: 600; }
-    .option input { width: auto; }
     .status { color: #0f766e; font-weight: 700; margin-top: 10px; }
-    .split-settings { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+    .muted { color: #667085; font-size: 13px; }
     .preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-top: 12px; }
     .piece { border: 1px solid #d9e0ea; border-radius: 8px; padding: 8px; background: #f8fafc; }
     .piece img { width: 100%; display: block; border-radius: 6px; background: #e5e7eb; }
     .piece span { display: block; margin-top: 6px; font-size: 12px; color: #475467; }
-    @media (max-width: 760px) {
+    @media (max-width: 900px) {
       main { padding: 14px; }
-      .grid, .split-settings { grid-template-columns: 1fr; }
+      .two-pane, .settings-grid, .prompt-grid { grid-template-columns: 1fr; }
       button { width: 100%; }
       .controls { display: grid; }
     }
@@ -41,37 +43,45 @@
   <main>
     <header>
       <h1>쇼츠 이미지 자동생성 PC</h1>
-      <p>API 없이 PC Edge 브라우저에서 ChatGPT를 열고 프롬프트를 입력합니다. 이미 열려 있는 ChatGPT 탭이 연결되면 그 마지막 창에서 바로 시작합니다.</p>
+      <p>프롬프트는 나눠진 칸 순서대로 하나씩 ChatGPT에 입력합니다. 이미지 분할은 별도 창에서 JPG/PNG 원본을 잘라 저장합니다.</p>
     </header>
 
     <section>
       <label for="projectName">프로젝트명</label>
       <input id="projectName" value="shorts_project">
-    </section>
-
-    <section>
-      <label for="sourceText">프롬프트 전체 붙여넣기</label>
-      <textarea id="sourceText" class="source" placeholder="컷1: ...&#10;&#10;이미지2: ...&#10;&#10;Prompt3: ...&#10;&#10;최대 20개까지 가능합니다."></textarea>
       <div class="controls">
-        <button id="splitBtn" type="button">프롬프트 1~20 자동 분리</button>
         <button id="checkBtn" class="secondary" type="button">ChatGPT 연결 확인</button>
         <button id="openBtn" class="secondary" type="button">ChatGPT 로그인/열기</button>
+        <button id="pathBtn" class="secondary" type="button">저장 위치 보기</button>
       </div>
       <p id="connectStatus" class="status">아직 연결 확인 전입니다.</p>
     </section>
 
-    <section class="row">
-      <div class="option">
-        <input id="batchMode" type="checkbox">
-        <label for="batchMode" style="margin:0;">전체 이미지를 한 번에 요청</label>
-      </div>
-      <div class="controls" style="margin:0;">
+    <section>
+      <div class="window-title">
+        <div>
+          <strong>창 1. 프롬프트 전체 붙여넣기</strong>
+          <p>컷1, 이미지1, Prompt1 같은 형식을 자동으로 읽고 오른쪽 칸에 나눕니다.</p>
+        </div>
         <button id="runBtn" type="button">프로그램 실행</button>
-        <button id="pathBtn" class="secondary" type="button">저장 위치 보기</button>
+      </div>
+      <div class="two-pane">
+        <div>
+          <label for="sourceText">전체 프롬프트</label>
+          <textarea id="sourceText" style="min-height:420px" placeholder="컷1: ...&#10;&#10;이미지2: ...&#10;&#10;Prompt3: ...&#10;&#10;최대 20개까지 가능합니다."></textarea>
+          <div class="controls">
+            <button id="splitBtn" type="button">프롬프트 1~20 자동 분리</button>
+          </div>
+        </div>
+        <div>
+          <div class="row">
+            <label style="margin:0;">나눠진 프롬프트 칸</label>
+            <span class="muted">실행 시 이 칸 순서대로 1개씩 전송</span>
+          </div>
+          <div class="prompt-grid" id="promptGrid"></div>
+        </div>
       </div>
     </section>
-
-    <section class="grid" id="promptGrid"></section>
 
     <section>
       <div class="row">
@@ -82,45 +92,65 @@
     </section>
 
     <section>
-      <div class="row">
+      <div class="window-title">
         <div>
-          <strong>이미지 분할 창</strong>
-          <p>한 장 안에 여러 이미지가 붙어 있을 때 원본 픽셀 그대로 각각 PNG로 잘라 저장합니다.</p>
+          <strong>창 2. 통합 이미지 분할</strong>
+          <p>ChatGPT가 여러 이미지를 한 장에 붙여 만들었을 때, 칸 수와 비율에 맞춰 각각 PNG로 저장합니다.</p>
         </div>
       </div>
-      <div class="split-settings">
+
+      <div class="two-pane">
         <div>
-          <label for="splitImage">원본 이미지</label>
-          <input id="splitImage" type="file" accept="image/*">
+          <label for="splitImage">통합된 이미지 넣는 칸 (JPG, PNG 호환)</label>
+          <input id="splitImage" type="file" accept="image/png,image/jpeg,image/jpg,image/webp,image/*">
+          <div class="controls">
+            <button id="chooseFolderBtn" class="secondary" type="button">나눠진 이미지 저장 경로 선택</button>
+          </div>
+          <p id="folderStatus" class="status">저장 경로: 브라우저 기본 다운로드 폴더</p>
         </div>
         <div>
-          <label for="splitCols">가로 칸</label>
-          <input id="splitCols" type="number" min="1" max="20" value="5">
-        </div>
-        <div>
-          <label for="splitRows">세로 줄</label>
-          <input id="splitRows" type="number" min="1" max="20" value="2">
-        </div>
-        <div>
-          <label for="splitGap">칸 사이 간격(px)</label>
-          <input id="splitGap" type="number" min="0" max="200" value="0">
+          <div class="settings-grid">
+            <div>
+              <label for="splitCols">가로 몇 장</label>
+              <input id="splitCols" type="number" min="1" max="20" value="5">
+            </div>
+            <div>
+              <label for="splitRows">세로 몇 장</label>
+              <input id="splitRows" type="number" min="1" max="20" value="2">
+            </div>
+            <div>
+              <label for="aspectRatio">이미지 비율</label>
+              <select id="aspectRatio">
+                <option value="auto">원본 칸 비율</option>
+                <option value="16:9">16:9</option>
+                <option value="9:16" selected>9:16</option>
+                <option value="4:3">4:3</option>
+                <option value="3:4">3:4</option>
+                <option value="1:1">1:1</option>
+              </select>
+            </div>
+            <div>
+              <label for="splitPrefix">파일명 앞부분</label>
+              <input id="splitPrefix" value="shorts_image">
+            </div>
+          </div>
+          <div class="settings-grid">
+            <div>
+              <label for="splitGap">칸 사이 간격(px)</label>
+              <input id="splitGap" type="number" min="0" max="200" value="0">
+            </div>
+            <div>
+              <label for="splitMargin">바깥 여백(px)</label>
+              <input id="splitMargin" type="number" min="0" max="500" value="0">
+            </div>
+          </div>
+          <div class="controls">
+            <button id="previewSplitBtn" type="button">분할 미리보기</button>
+            <button id="downloadSplitBtn" class="secondary" type="button">분할 이미지 저장</button>
+          </div>
+          <p id="splitStatus" class="status">통합 이미지를 선택하세요.</p>
         </div>
       </div>
-      <div class="split-settings">
-        <div>
-          <label for="splitMargin">바깥 여백(px)</label>
-          <input id="splitMargin" type="number" min="0" max="500" value="0">
-        </div>
-        <div>
-          <label for="splitPrefix">파일명 앞부분</label>
-          <input id="splitPrefix" value="shorts_image">
-        </div>
-      </div>
-      <div class="controls">
-        <button id="previewSplitBtn" type="button">분할 미리보기</button>
-        <button id="downloadSplitBtn" class="secondary" type="button">분할 이미지 저장</button>
-      </div>
-      <p id="splitStatus" class="status">원본 이미지를 선택하세요.</p>
       <div id="splitPreview" class="preview-grid"></div>
     </section>
   </main>
@@ -133,6 +163,7 @@
     let latestStatus = { running: false, paused: false, progressMessage: "대기 중" };
     let dotTick = 0;
     let splitPieces = [];
+    let saveDirectoryHandle = null;
 
     function parsePrompts(raw) {
       const text = raw.replace(/\r/g, "").trim();
@@ -157,8 +188,7 @@
         }
         const match = line.match(label);
         const numberMatch = line.match(numberLabel);
-        const isLabel = Boolean(match || numberMatch);
-        if (isLabel) {
+        if (match || numberMatch) {
           flush();
           activeBlock = true;
           current = ((match && match[2]) || (numberMatch && numberMatch[2]) || "").trim();
@@ -204,7 +234,7 @@
 
     function loadSelectedImage() {
       const file = $("splitImage").files?.[0];
-      if (!file) throw new Error("분할할 이미지를 먼저 선택하세요.");
+      if (!file) throw new Error("분할할 통합 이미지를 먼저 선택하세요.");
       return new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => resolve(img);
@@ -213,39 +243,59 @@
       });
     }
 
+    function ratioToNumber(value) {
+      if (value === "auto") return null;
+      const [w, h] = value.split(":").map(Number);
+      return w / h;
+    }
+
+    function fitCropToRatio(width, height, ratio) {
+      if (!ratio) return { width, height, offsetX: 0, offsetY: 0 };
+      const current = width / height;
+      if (current > ratio) {
+        const targetW = Math.floor(height * ratio);
+        return { width: targetW, height, offsetX: Math.floor((width - targetW) / 2), offsetY: 0 };
+      }
+      const targetH = Math.floor(width / ratio);
+      return { width, height: targetH, offsetX: 0, offsetY: Math.floor((height - targetH) / 2) };
+    }
+
     async function buildSplitPieces() {
       const img = await loadSelectedImage();
       const cols = Math.max(1, Number($("splitCols").value || 1));
       const rows = Math.max(1, Number($("splitRows").value || 1));
       const gap = Math.max(0, Number($("splitGap").value || 0));
       const margin = Math.max(0, Number($("splitMargin").value || 0));
-      const cropW = Math.floor((img.naturalWidth - margin * 2 - gap * (cols - 1)) / cols);
-      const cropH = Math.floor((img.naturalHeight - margin * 2 - gap * (rows - 1)) / rows);
-      if (cropW <= 0 || cropH <= 0) throw new Error("여백 또는 간격이 너무 큽니다.");
+      const cellW = Math.floor((img.naturalWidth - margin * 2 - gap * (cols - 1)) / cols);
+      const cellH = Math.floor((img.naturalHeight - margin * 2 - gap * (rows - 1)) / rows);
+      if (cellW <= 0 || cellH <= 0) throw new Error("여백 또는 간격이 너무 큽니다.");
 
+      const ratio = ratioToNumber($("aspectRatio").value);
+      const crop = fitCropToRatio(cellW, cellH, ratio);
       const pieces = [];
       for (let row = 0; row < rows; row++) {
         for (let col = 0; col < cols; col++) {
           const canvas = document.createElement("canvas");
-          canvas.width = cropW;
-          canvas.height = cropH;
+          canvas.width = crop.width;
+          canvas.height = crop.height;
           const ctx = canvas.getContext("2d", { alpha: false });
           ctx.imageSmoothingEnabled = false;
           ctx.drawImage(
             img,
-            margin + col * (cropW + gap),
-            margin + row * (cropH + gap),
-            cropW,
-            cropH,
+            margin + col * (cellW + gap) + crop.offsetX,
+            margin + row * (cellH + gap) + crop.offsetY,
+            crop.width,
+            crop.height,
             0,
             0,
-            cropW,
-            cropH
+            crop.width,
+            crop.height
           );
           pieces.push({
             index: pieces.length + 1,
-            width: cropW,
-            height: cropH,
+            width: crop.width,
+            height: crop.height,
+            blobPromise: new Promise(resolve => canvas.toBlob(resolve, "image/png")),
             url: canvas.toDataURL("image/png")
           });
         }
@@ -265,22 +315,37 @@
         `;
         $("splitPreview").appendChild(item);
       });
-      $("splitStatus").textContent = `${splitPieces.length}개 이미지로 분할했습니다. 원본 해상도 crop이라 품질을 낮추지 않습니다.`;
+      $("splitStatus").textContent = `${splitPieces.length}개 이미지로 분할했습니다. 선택 비율 기준으로 원본 픽셀을 crop합니다.`;
     }
 
-    function downloadSplitPieces() {
+    async function saveBlobToDirectory(blob, fileName) {
+      const fileHandle = await saveDirectoryHandle.getFileHandle(fileName, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+    }
+
+    async function downloadSplitPieces() {
       if (!splitPieces.length) throw new Error("먼저 분할 미리보기를 실행하세요.");
       const prefix = ($("splitPrefix").value || "shorts_image").replace(/[\\/:*?"<>|]/g, "_");
-      splitPieces.forEach((piece, index) => {
-        setTimeout(() => {
+      for (const piece of splitPieces) {
+        const fileName = `${prefix}_${String(piece.index).padStart(2, "0")}.png`;
+        const blob = await piece.blobPromise;
+        if (saveDirectoryHandle) {
+          await saveBlobToDirectory(blob, fileName);
+        } else {
           const a = document.createElement("a");
-          a.href = piece.url;
-          a.download = `${prefix}_${String(piece.index).padStart(2, "0")}.png`;
+          a.href = URL.createObjectURL(blob);
+          a.download = fileName;
           document.body.appendChild(a);
           a.click();
           a.remove();
-        }, index * 250);
-      });
+          await new Promise(resolve => setTimeout(resolve, 180));
+        }
+      }
+      $("splitStatus").textContent = saveDirectoryHandle
+        ? `${splitPieces.length}개 이미지를 선택한 저장 경로에 저장했습니다.`
+        : `${splitPieces.length}개 이미지 다운로드를 시작했습니다.`;
     }
 
     $("splitBtn").addEventListener("click", () => {
@@ -325,8 +390,7 @@
         } else {
           await post("/api/run", {
             projectName: $("projectName").value,
-            prompts,
-            batchMode: $("batchMode").checked
+            prompts
           });
         }
         await poll(true);
@@ -341,6 +405,15 @@
       alert(`저장 위치:\n${json.outputRoot}`);
     });
 
+    $("chooseFolderBtn").addEventListener("click", async () => {
+      if (!window.showDirectoryPicker) {
+        alert("이 브라우저는 저장 경로 직접 선택을 지원하지 않습니다. 기본 다운로드 폴더로 저장됩니다.");
+        return;
+      }
+      saveDirectoryHandle = await window.showDirectoryPicker();
+      $("folderStatus").textContent = `저장 경로: ${saveDirectoryHandle.name}`;
+    });
+
     $("previewSplitBtn").addEventListener("click", async () => {
       try {
         await previewSplit();
@@ -350,9 +423,9 @@
       }
     });
 
-    $("downloadSplitBtn").addEventListener("click", () => {
+    $("downloadSplitBtn").addEventListener("click", async () => {
       try {
-        downloadSplitPieces();
+        await downloadSplitPieces();
       } catch (error) {
         alert(error.message);
       }
