@@ -24,6 +24,8 @@ let browserContext = null;
 let page = null;
 let connectedByCdp = false;
 let running = false;
+let paused = false;
+let progressMessage = "대기 중";
 let currentLog = [];
 
 function now() {
@@ -34,6 +36,17 @@ function log(message) {
   const line = `[${now()}] ${message}`;
   currentLog.unshift(line);
   console.log(line);
+}
+
+function setProgress(message) {
+  progressMessage = message;
+  log(message);
+}
+
+async function waitIfPaused() {
+  while (running && paused) {
+    await page.waitForTimeout(500);
+  }
 }
 
 function sanitize(value) {
@@ -203,6 +216,7 @@ async function clickSend() {
 
   const deadline = Date.now() + 20000;
   while (Date.now() < deadline) {
+    await waitIfPaused();
     for (const selector of candidates) {
       const button = page.locator(selector).last();
       if (await button.count()) {
@@ -233,6 +247,7 @@ async function waitUntilGenerationSettles() {
   const start = Date.now();
   let stableChecks = 0;
   while (Date.now() - start < 240000) {
+    await waitIfPaused();
     const stopVisible = await page.locator([
       "button:has-text('Stop')",
       "button:has-text('중지')",
@@ -280,6 +295,8 @@ async function tryDownloadLatestImages(projectDir, index) {
 async function runAutomation({ projectName, prompts, batchMode }) {
   if (running) throw new Error("이미 실행 중입니다.");
   running = true;
+  paused = false;
+  progressMessage = "작업 시작";
   currentLog = [];
 
   const safeProject = sanitize(projectName);
@@ -295,25 +312,29 @@ async function runAutomation({ projectName, prompts, batchMode }) {
 
     if (batchMode) {
       const combined = buildBatchPrompt(prompts);
-      log(`${prompts.length}개 이미지를 한 번에 요청합니다.`);
+      setProgress(`${prompts.length}개 이미지를 한 번에 요청합니다.`);
       await submitPrompt(combined);
       await waitUntilGenerationSettles();
-      log("통합 생성 완료. 이미지 다운로드는 진행하지 않습니다.");
+      setProgress("통합 생성 완료. 이미지 다운로드는 진행하지 않습니다.");
     } else {
       for (let i = 0; i < prompts.length; i++) {
-        log(`프롬프트 ${i + 1}/${prompts.length} 전송`);
+        await waitIfPaused();
+        setProgress(`프롬프트 ${i + 1}/${prompts.length} 입력 및 전송 중`);
         await submitPrompt(prompts[i]);
+        setProgress(`프롬프트 ${i + 1}/${prompts.length} 이미지 생성 대기 중`);
         const settled = await waitUntilGenerationSettles();
         if (!settled) log(`프롬프트 ${i + 1} 대기 시간 초과`);
-        log(`프롬프트 ${i + 1} 이미지 생성 요청 완료. 다운로드는 진행하지 않습니다.`);
+        setProgress(`프롬프트 ${i + 1}/${prompts.length} 완료. 다운로드는 진행하지 않습니다.`);
         await page.waitForTimeout(2000);
       }
     }
 
-    log(`작업 완료. 저장 폴더: ${projectDir}`);
+    setProgress(`작업 완료. 저장 폴더: ${projectDir}`);
     await fs.writeFile(path.join(projectDir, "log.txt"), currentLog.slice().reverse().join("\n"), "utf8");
   } finally {
     running = false;
+    paused = false;
+    progressMessage = "대기 중";
   }
 }
 
@@ -357,8 +378,24 @@ app.post("/api/run", async (req, res) => {
   res.json({ ok: true });
 });
 
+app.post("/api/pause", (_req, res) => {
+  if (!running) return res.json({ ok: true, running, paused });
+  paused = true;
+  progressMessage = "일시 중지";
+  log("일시 중지했습니다. 재시작을 누르면 다음 단계부터 계속 진행합니다.");
+  res.json({ ok: true, running, paused });
+});
+
+app.post("/api/resume", (_req, res) => {
+  if (!running) return res.json({ ok: true, running, paused });
+  paused = false;
+  progressMessage = "재시작";
+  log("재시작했습니다.");
+  res.json({ ok: true, running, paused });
+});
+
 app.get("/api/status", (_req, res) => {
-  res.json({ running, log: currentLog });
+  res.json({ running, paused, progressMessage, log: currentLog });
 });
 
 app.get("/api/output-path", (_req, res) => {

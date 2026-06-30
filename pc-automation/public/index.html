@@ -83,6 +83,8 @@
     const prompts = Array(maxPrompts).fill("");
     const $ = (id) => document.getElementById(id);
     const grid = $("promptGrid");
+    let latestStatus = { running: false, paused: false, progressMessage: "대기 중" };
+    let dotTick = 0;
 
     function parsePrompts(raw) {
       const text = raw.replace(/\r/g, "").trim();
@@ -187,11 +189,18 @@
 
     $("runBtn").addEventListener("click", async () => {
       try {
-        await post("/api/run", {
-          projectName: $("projectName").value,
-          prompts,
-          batchMode: $("batchMode").checked
-        });
+        if (latestStatus.running && !latestStatus.paused) {
+          await post("/api/pause");
+        } else if (latestStatus.running && latestStatus.paused) {
+          await post("/api/resume");
+        } else {
+          await post("/api/run", {
+            projectName: $("projectName").value,
+            prompts,
+            batchMode: $("batchMode").checked
+          });
+        }
+        await poll(true);
       } catch (error) {
         alert(error.message);
       }
@@ -203,14 +212,35 @@
       alert(`저장 위치:\n${json.outputRoot}`);
     });
 
-    async function poll() {
+    function updateRunButton() {
+      if (!latestStatus.running) {
+        $("runBtn").textContent = "프로그램 실행";
+      } else if (latestStatus.paused) {
+        $("runBtn").textContent = "재시작";
+      } else {
+        $("runBtn").textContent = "일시 중지";
+      }
+    }
+
+    async function poll(runOnce = false) {
       try {
         const res = await fetch("/api/status");
         const json = await res.json();
-        $("runningText").textContent = json.running ? "실행 중" : "대기 중";
-        $("log").textContent = json.log?.length ? json.log.join("\n") : "아직 기록이 없습니다.";
+        latestStatus = json;
+        updateRunButton();
+        const dots = ".".repeat((dotTick++ % 4) + 1);
+        const statusText = json.running
+          ? (json.paused ? "일시 중지" : `진행 현황${dots}`)
+          : "대기 중";
+        $("runningText").textContent = statusText;
+        const progressLine = json.running
+          ? `${statusText} ${json.progressMessage || ""}`.trim()
+          : json.progressMessage || "대기 중";
+        $("log").textContent = json.log?.length
+          ? `${progressLine}\n\n${json.log.join("\n")}`
+          : `${progressLine}\n\n아직 기록이 없습니다.`;
       } catch {}
-      setTimeout(poll, 1200);
+      if (!runOnce) setTimeout(poll, 700);
     }
 
     render();
