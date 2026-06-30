@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>쇼츠 이미지 자동생성 PC</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f7fb; color: #172033; }
+    main { width: min(1040px, 100%); margin: 0 auto; padding: 18px; }
+    h1 { margin: 0 0 8px; font-size: clamp(24px, 5vw, 34px); letter-spacing: 0; }
+    p { margin: 0; color: #667085; line-height: 1.45; }
+    section { background: #fff; border: 1px solid #d9e0ea; border-radius: 8px; padding: 14px; margin: 12px 0; }
+    label { display: block; font-weight: 700; margin-bottom: 8px; }
+    input, textarea { width: 100%; border: 1px solid #d9e0ea; border-radius: 8px; padding: 11px 12px; font: inherit; }
+    textarea { min-height: 120px; resize: vertical; line-height: 1.45; }
+    .source { min-height: 180px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    button { border: 1px solid transparent; border-radius: 8px; min-height: 42px; padding: 9px 13px; font: inherit; font-weight: 700; cursor: pointer; background: #0f766e; color: white; }
+    button.secondary { background: #fff; color: #172033; border-color: #d9e0ea; }
+    button.warn { background: #fff7ed; color: #b45309; border-color: #fed7aa; }
+    .row { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+    .log { white-space: pre-wrap; background: #101828; color: #f9fafb; border-radius: 8px; padding: 12px; min-height: 150px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; overflow: auto; }
+    .option { display: flex; align-items: center; gap: 8px; color: #344054; font-weight: 600; }
+    .option input { width: auto; }
+    @media (max-width: 760px) {
+      main { padding: 14px; }
+      .grid { grid-template-columns: 1fr; }
+      button { width: 100%; }
+      .controls { display: grid; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>쇼츠 이미지 자동생성 PC</h1>
+      <p>API 없이 PC 브라우저에서 ChatGPT를 열고 프롬프트를 입력합니다. 처음 실행 시 열린 브라우저에서 ChatGPT 로그인만 해두세요.</p>
+    </header>
+
+    <section>
+      <label for="projectName">프로젝트명</label>
+      <input id="projectName" value="shorts_project">
+    </section>
+
+    <section>
+      <label for="sourceText">프롬프트 전체 붙여넣기</label>
+      <textarea id="sourceText" class="source" placeholder="컷1: ...&#10;&#10;컷2: ...&#10;&#10;또는 Prompt 1: ..."></textarea>
+      <div class="controls">
+        <button id="splitBtn" type="button">프롬프트 1~6 자동 분리</button>
+        <button id="openBtn" class="secondary" type="button">ChatGPT 로그인/열기</button>
+      </div>
+    </section>
+
+    <section class="row">
+      <div class="option">
+        <input id="batchMode" type="checkbox" checked>
+        <label for="batchMode" style="margin:0;">6장을 한 번에 요청</label>
+      </div>
+      <div class="controls" style="margin:0;">
+        <button id="runBtn" type="button">프로그램 실행</button>
+        <button id="pathBtn" class="secondary" type="button">저장 위치 보기</button>
+      </div>
+    </section>
+
+    <section class="grid" id="promptGrid"></section>
+
+    <section>
+      <div class="row">
+        <strong>상태 로그</strong>
+        <span id="runningText">대기 중</span>
+      </div>
+      <div id="log" class="log">아직 기록이 없습니다.</div>
+    </section>
+  </main>
+
+  <script>
+    const prompts = Array(6).fill("");
+    const $ = (id) => document.getElementById(id);
+    const grid = $("promptGrid");
+
+    function parsePrompts(raw) {
+      const text = raw.replace(/\r/g, "").trim();
+      if (!text) return [];
+      const lines = text.split("\n");
+      const blocks = [];
+      let current = "";
+      const label = /^(?:#{1,6}\s*)?(?:컷|프롬프트|prompt|cut)?\s*([1-6])\s*(?:[\).:\-]|번)?\s*(.*)$/i;
+      const flush = () => {
+        const value = current.trim();
+        if (value) blocks.push(value);
+        current = "";
+      };
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) {
+          if (current) current += "\n";
+          continue;
+        }
+        const match = line.match(label);
+        const isLabel = match && (/컷|프롬프트|prompt|cut/i.test(line) || /^[1-6]\s*[\).:\-]/.test(line));
+        if (isLabel) {
+          flush();
+          current = (match[2] || "").trim();
+        } else if (current) {
+          current += (current.endsWith("\n") ? "" : "\n") + line;
+        }
+      }
+      flush();
+      if (blocks.length) return blocks.slice(0, 6);
+      const paragraphs = text.split(/\n\s*\n/).map(v => v.trim()).filter(Boolean);
+      if (paragraphs.length >= 2) return paragraphs.slice(0, 6);
+      return lines.map(v => v.trim().replace(/^[-*]\s*/, "")).filter(v => v.length >= 8).slice(0, 6);
+    }
+
+    function render() {
+      grid.innerHTML = "";
+      prompts.forEach((prompt, index) => {
+        const panel = document.createElement("section");
+        panel.innerHTML = `
+          <label for="prompt${index}">프롬프트 ${index + 1}</label>
+          <textarea id="prompt${index}" data-index="${index}"></textarea>
+        `;
+        grid.appendChild(panel);
+        panel.querySelector("textarea").value = prompt;
+      });
+      grid.querySelectorAll("textarea").forEach(area => {
+        area.addEventListener("input", (event) => {
+          prompts[Number(event.target.dataset.index)] = event.target.value;
+        });
+      });
+    }
+
+    async function post(url, body = {}) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.ok === false) throw new Error(json.error || "요청 실패");
+      return json;
+    }
+
+    $("splitBtn").addEventListener("click", () => {
+      const parsed = parsePrompts($("sourceText").value);
+      if (!parsed.length) {
+        alert("프롬프트를 찾지 못했습니다.");
+        return;
+      }
+      parsed.forEach((prompt, index) => prompts[index] = prompt);
+      render();
+    });
+
+    $("openBtn").addEventListener("click", async () => {
+      try {
+        await post("/api/open-chatgpt");
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+
+    $("runBtn").addEventListener("click", async () => {
+      try {
+        await post("/api/run", {
+          projectName: $("projectName").value,
+          prompts,
+          batchMode: $("batchMode").checked
+        });
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+
+    $("pathBtn").addEventListener("click", async () => {
+      const res = await fetch("/api/output-path");
+      const json = await res.json();
+      alert(`저장 위치:\n${json.outputRoot}`);
+    });
+
+    async function poll() {
+      try {
+        const res = await fetch("/api/status");
+        const json = await res.json();
+        $("runningText").textContent = json.running ? "실행 중" : "대기 중";
+        $("log").textContent = json.log?.length ? json.log.join("\n") : "아직 기록이 없습니다.";
+      } catch {}
+      setTimeout(poll, 1200);
+    }
+
+    render();
+    poll();
+  </script>
+</body>
+</html>
