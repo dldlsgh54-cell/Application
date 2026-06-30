@@ -54,7 +54,7 @@ function sanitize(value) {
 }
 
 function isChatGptUrl(url) {
-  return /https?:\/\/([^/]+\.)?chatgpt\.com\//i.test(url || "");
+  return String(url || "").toLowerCase().includes("chatgpt.com");
 }
 
 async function ensureBrowser() {
@@ -189,16 +189,35 @@ async function findPromptBox() {
   return null;
 }
 
+async function getPromptBoxText(box) {
+  return await box.evaluate((element) => {
+    if ("value" in element) return element.value || "";
+    return element.innerText || element.textContent || "";
+  }).catch(() => "");
+}
+
 async function fillPromptBox(box, prompt) {
   await box.click();
-  try {
-    await box.fill(prompt);
-    return;
-  } catch {
-    // contenteditable editors sometimes reject fill(); keyboard insertion is the fallback.
-  }
   await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+  await page.keyboard.press("Backspace");
   await page.keyboard.insertText(prompt);
+  await page.waitForTimeout(500);
+
+  let text = (await getPromptBoxText(box)).trim();
+  if (!text) {
+    await box.evaluate((element, value) => {
+      if ("value" in element) {
+        element.value = value;
+      } else {
+        element.textContent = value;
+      }
+      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+    }, prompt);
+    await page.waitForTimeout(500);
+    text = (await getPromptBoxText(box)).trim();
+  }
+
+  if (!text) throw new Error("프롬프트가 입력창에 들어가지 않았습니다.");
 }
 
 async function clickSend() {
@@ -207,11 +226,12 @@ async function clickSend() {
     "button[data-testid='composer-submit-button']",
     "button[aria-label*='Send prompt']",
     "button[aria-label*='프롬프트 보내기']",
+    "button[aria-label*='메시지 보내기']",
+    "button[aria-label*='보내기']",
     "button[aria-label*='Send']",
     "button[aria-label*='send']",
     "button[aria-label*='전송']",
-    "button:has-text('Send')",
-    "form button:not([disabled])"
+    "button:has-text('Send')"
   ];
 
   const deadline = Date.now() + 20000;
@@ -234,13 +254,45 @@ async function clickSend() {
   throw new Error("전송 버튼이 활성화되지 않았습니다.");
 }
 
+async function countUserMessages() {
+  return await page.locator("[data-message-author-role='user']").count().catch(() => 0);
+}
+
+async function waitForPromptSent(box, beforeUserMessages) {
+  const start = Date.now();
+  while (Date.now() - start < 12000) {
+    const afterUserMessages = await countUserMessages();
+    if (afterUserMessages > beforeUserMessages) return true;
+    await page.waitForTimeout(400);
+  }
+
+  const text = (await getPromptBoxText(box)).trim();
+  if (!text) {
+    throw new Error("입력창은 비었지만 ChatGPT 대화에 새 메시지가 생기지 않았습니다. 전송 버튼 클릭이 실패했을 가능성이 큽니다.");
+  }
+  return false;
+}
+
 async function submitPrompt(prompt) {
   const box = await findPromptBox();
   if (!box) throw new Error("ChatGPT 입력창을 찾지 못했습니다.");
+  const beforeUserMessages = await countUserMessages();
   await fillPromptBox(box, prompt);
   await page.waitForTimeout(700);
   await clickSend();
-  await page.waitForTimeout(3000);
+  const sent = await waitForPromptSent(box, beforeUserMessages);
+  if (!sent) throw new Error("ChatGPT 대화에 새 사용자 메시지가 생기지 않았습니다.");
+}
+
+async function countStopButtons() {
+  return await page.locator([
+    "button:has-text('Stop')",
+    "button:has-text('중지')",
+    "button:has-text('중단')",
+    "button[aria-label*='Stop']",
+    "button[aria-label*='중지']",
+    "button[aria-label*='중단']"
+  ].join(", ")).count().catch(() => 0);
 }
 
 async function waitUntilGenerationSettles(index, total) {
@@ -250,48 +302,20 @@ async function waitUntilGenerationSettles(index, total) {
     await waitIfPaused();
     const elapsed = Math.floor((Date.now() - start) / 1000);
     progressMessage = `프롬프트 ${index}/${total} 이미지 생성 대기 중 (${elapsed}초)`;
-    const stopVisible = await page.locator([
-      "button:has-text('Stop')",
-      "button:has-text('중지')",
-      "button:has-text('중단')",
-      "button[aria-label*='Stop']",
-      "button[aria-label*='중지']",
-      "button[aria-label*='중단']"
-    ].join(", ")).count().catch(() => 0);
-    const generatingText = await page.locator("text=/generating|creating|drawing|이미지 생성|생성 중|만드는 중/i").count().catch(() => 0);
-    if (!stopVisible && !generatingText) {
+    const stopVisible = await countStopButtons();
+    if (!stopVisible) {
       stableChecks += 1;
-      if (Date.now() - start > 15000 && stableChecks >= 3) return true;
+      if (elapsed > 20 && stableChecks >= 3) return true;
+      if (elapsed >= 90) {
+        log(`프롬프트 ${index} 자동 대기 90초 경과. 다음 프롬프트로 진행합니다.`);
+        return true;
+      }
     } else {
       stableChecks = 0;
     }
     await page.waitForTimeout(5000);
   }
   return false;
-}
-
-async function tryDownloadLatestImages(projectDir, index) {
-  const downloadButtons = page.locator("a[download], button[aria-label*='Download'], button[aria-label*='다운로드']");
-  const count = await downloadButtons.count().catch(() => 0);
-  if (!count) return false;
-
-  let saved = false;
-  for (let i = Math.max(0, count - 3); i < count; i++) {
-    const target = downloadButtons.nth(i);
-    const visible = await target.isVisible().catch(() => false);
-    if (!visible) continue;
-    try {
-      const downloadPromise = page.waitForEvent("download", { timeout: 7000 });
-      await target.click();
-      const download = await downloadPromise;
-      const fileName = `${String(index + 1).padStart(2, "0")}-${Date.now()}-${download.suggestedFilename() || "image.png"}`;
-      await download.saveAs(path.join(projectDir, fileName));
-      saved = true;
-    } catch {
-      // Some ChatGPT buttons open menus instead of direct downloads.
-    }
-  }
-  return saved;
 }
 
 async function runAutomation({ projectName, prompts }) {
@@ -330,17 +354,6 @@ async function runAutomation({ projectName, prompts }) {
     paused = false;
     progressMessage = "대기 중";
   }
-}
-
-function buildBatchPrompt(prompts) {
-  const count = prompts.length;
-  return [
-    `아래 ${count}개의 이미지 프롬프트를 각각 독립적인 이미지로 생성해줘.`,
-    `반드시 한 장에 ${count}컷을 합치지 말고, 01부터 ${String(count).padStart(2, "0")}까지 별도의 이미지 ${count}장으로 만들어줘.`,
-    "모든 이미지는 쇼츠용 9:16 세로 비율로 만들어줘.",
-    "",
-    ...prompts.map((prompt, index) => `Image ${String(index + 1).padStart(2, "0")}:\n${prompt}`)
-  ].join("\n\n");
 }
 
 app.post("/api/open-chatgpt", async (_req, res) => {
