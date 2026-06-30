@@ -72,12 +72,14 @@ jobs:
             build-error-lines.txt
 
       - name: Publish latest debug APK release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: debug-latest
-          name: Latest Debug APK
-          body: |
-            최신 디버그 APK입니다. 폰에서 app-debug.apk를 다운로드해 설치하세요.
-          files: app/build/outputs/apk/debug/app-debug.apk
-          prerelease: true
-          make_latest: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -f debug-latest
+          git push -f origin debug-latest
+          gh release delete debug-latest --yes || true
+          gh release create debug-latest app/build/outputs/apk/debug/app-debug.apk \
+            --title "Latest Debug APK" \
+            --notes "최신 디버그 APK입니다. 폰에서 app-debug.apk를 다운로드해 설치하세요." \
+            --prerelease \
+            --latest
