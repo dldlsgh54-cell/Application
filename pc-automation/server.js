@@ -25,7 +25,7 @@ let page = null;
 let connectedByCdp = false;
 let running = false;
 let paused = false;
-let progressMessage = "대기 중";
+let progressMessage = "Idle";
 let currentLog = [];
 
 function now() {
@@ -44,9 +44,7 @@ function setProgress(message) {
 }
 
 async function waitIfPaused() {
-  while (running && paused) {
-    await page.waitForTimeout(500);
-  }
+  while (running && paused) await page.waitForTimeout(500);
 }
 
 function sanitize(value) {
@@ -57,23 +55,37 @@ function isChatGptUrl(url) {
   return String(url || "").toLowerCase().includes("chatgpt.com");
 }
 
-async function ensureBrowser() {
-  if (browserContext) return browserContext;
-  await fs.mkdir(outputRoot, { recursive: true });
+function resetBrowserRefs() {
+  browser = null;
+  browserContext = null;
+  page = null;
+  connectedByCdp = false;
+}
 
+async function ensureBrowser() {
+  if (browserContext) {
+    try {
+      page = await pickWorkingPage(browserContext);
+      return browserContext;
+    } catch {
+      resetBrowserRefs();
+    }
+  }
+
+  await fs.mkdir(outputRoot, { recursive: true });
   const cdpContext = await tryConnectExistingEdge();
   if (cdpContext) {
     browserContext = cdpContext;
     connectedByCdp = true;
     page = await pickWorkingPage(browserContext);
-    log("기존 Edge 브라우저에 연결했습니다.");
+    log("Connected to existing Edge browser.");
     return browserContext;
   }
 
   connectedByCdp = false;
   browserContext = await launchEdgeContext();
   page = await pickWorkingPage(browserContext);
-  log("자동화용 Edge 브라우저를 새로 열었습니다.");
+  log("Opened automation Edge browser.");
   return browserContext;
 }
 
@@ -94,7 +106,6 @@ async function launchEdgeContext() {
     viewport: { width: 1280, height: 900 },
     downloadsPath: outputRoot
   };
-
   try {
     return await chromium.launchPersistentContext(profileDir, launchOptions);
   } catch (edgeError) {
@@ -115,51 +126,35 @@ async function launchEdgeContext() {
 }
 
 async function pickWorkingPage(context) {
-  const pages = context.pages();
+  const pages = context.pages().filter((candidate) => !candidate.isClosed());
   const chatPage = [...pages].reverse().find((candidate) => isChatGptUrl(candidate.url()));
   const selected = chatPage || pages[pages.length - 1] || await context.newPage();
   selected.setDefaultTimeout(10000);
   return selected;
 }
 
-async function ensureChatGptPage({ navigateIfMissing = true } = {}) {
+async function ensureChatGptPage() {
   await ensureBrowser();
   page = await pickWorkingPage(browserContext);
   if (isChatGptUrl(page.url())) {
     await page.bringToFront().catch(() => {});
     return { found: true, page };
   }
-
-  if (!navigateIfMissing) {
-    return { found: false, page };
-  }
-
-  await page.goto("https://chatgpt.com/", { waitUntil: "domcontentloaded" });
-  await page.bringToFront().catch(() => {});
   return { found: false, page };
 }
 
-async function openChatGpt() {
-  const result = await ensureChatGptPage({ navigateIfMissing: true });
-  if (result.found) {
-    log(`현재 ChatGPT 탭에 연결됨: ${page.url()}`);
-  } else {
-    log("ChatGPT를 열었습니다. 로그인 화면이면 먼저 로그인하세요.");
-  }
-}
-
 async function getConnectionStatus() {
-  const result = await ensureChatGptPage({ navigateIfMissing: false });
-  const title = await page.title().catch(() => "");
-  const url = page.url();
+  const result = await ensureChatGptPage();
+  const title = page ? await page.title().catch(() => "") : "";
+  const url = page ? page.url() : "";
   return {
     connected: result.found,
     usingCdp: connectedByCdp,
     title,
     url,
     message: result.found
-      ? "ChatGPT 탭에 연결되었습니다. 실행하면 이 탭에서 바로 시작합니다."
-      : "Edge는 연결되었지만 ChatGPT 탭을 찾지 못했습니다. Edge에서 ChatGPT를 열어주세요."
+      ? "ChatGPT tab connected."
+      : "ChatGPT tab was not found. Open chatgpt.com in Edge first."
   };
 }
 
@@ -172,13 +167,27 @@ async function findPromptBox() {
     "textarea",
     "[contenteditable='true']",
     "div.ProseMirror",
-    "[data-placeholder*='무엇이든 물어보세요']",
-    "[data-placeholder*='Message']",
+    "[placeholder*='무엇이든']",
     "[data-placeholder*='무엇이든']",
+    "[data-placeholder*='Message']",
     "[aria-label*='Message']",
     "[aria-label*='메시지']",
     "[aria-label*='프롬프트']"
   ];
+
+  for (const selector of selectors) {
+    const matches = page.locator(selector);
+    const count = await matches.count().catch(() => 0);
+    for (let i = count - 1; i >= 0; i--) {
+      const locator = matches.nth(i);
+      const visible = await locator.isVisible().catch(() => false);
+      if (!visible) continue;
+      const box = await locator.boundingBox().catch(() => null);
+      const viewport = page.viewportSize() || { height: 900 };
+      if (box && box.y >= viewport.height * 0.5) return locator;
+    }
+  }
+
   for (const selector of selectors) {
     const locator = page.locator(selector).last();
     if (await locator.count()) {
@@ -190,34 +199,52 @@ async function findPromptBox() {
 }
 
 async function getPromptBoxText(box) {
+  if (!box) return "";
   return await box.evaluate((element) => {
     if ("value" in element) return element.value || "";
     return element.innerText || element.textContent || "";
   }).catch(() => "");
 }
 
-async function fillPromptBox(box, prompt) {
-  await box.click();
+async function typePromptText(prompt) {
   await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
   await page.keyboard.press("Backspace");
   await page.keyboard.insertText(prompt);
-  await page.waitForTimeout(500);
+}
 
+async function clickPromptCoordinateFallback() {
+  return await page.evaluate(() => {
+    const bottom = window.innerHeight * 0.5;
+    const candidates = [...document.querySelectorAll("textarea, input, [contenteditable='true'], div, p")]
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const text = `${element.getAttribute("placeholder") || ""} ${element.getAttribute("data-placeholder") || ""} ${element.getAttribute("aria-label") || ""} ${element.textContent || ""}`;
+        return { element, rect, text };
+      })
+      .filter(({ rect, text }) => rect.width > 80 && rect.height > 20 && rect.y >= bottom && /무엇이든|물어보세요|message|prompt/i.test(text))
+      .sort((a, b) => (b.rect.y + b.rect.height) - (a.rect.y + a.rect.height));
+    const target = candidates[0];
+    if (!target) return false;
+    target.element.click();
+    return true;
+  }).catch(() => false);
+}
+
+async function fillPromptBox(box, prompt) {
+  await box.click();
+  await typePromptText(prompt);
+  await page.waitForTimeout(500);
   let text = (await getPromptBoxText(box)).trim();
   if (!text) {
     await box.evaluate((element, value) => {
-      if ("value" in element) {
-        element.value = value;
-      } else {
-        element.textContent = value;
-      }
+      if ("value" in element) element.value = value;
+      else element.textContent = value;
       element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
     }, prompt);
     await page.waitForTimeout(500);
     text = (await getPromptBoxText(box)).trim();
   }
-
-  if (!text) throw new Error("프롬프트가 입력창에 들어가지 않았습니다.");
+  if (!text) throw new Error("Prompt was not inserted into the input box.");
 }
 
 async function clickSend() {
@@ -248,10 +275,36 @@ async function clickSend() {
         }
       }
     }
+    const fallbackClicked = await clickSendCoordinateFallback();
+    if (fallbackClicked) return true;
     await page.waitForTimeout(300);
   }
+  throw new Error("Send button was not active.");
+}
 
-  throw new Error("전송 버튼이 활성화되지 않았습니다.");
+async function clickSendCoordinateFallback() {
+  return await page.evaluate(() => {
+    const blocked = /attach|file|upload|voice|mic|microphone|dictate|audio|파일|첨부|업로드|음성|마이크/i;
+    const candidates = [...document.querySelectorAll("button")]
+      .map((button) => {
+        const rect = button.getBoundingClientRect();
+        const label = `${button.getAttribute("aria-label") || ""} ${button.textContent || ""} ${button.getAttribute("data-testid") || ""}`;
+        return { button, rect, label };
+      })
+      .filter(({ button, rect, label }) =>
+        !button.disabled &&
+        rect.width > 18 &&
+        rect.height > 18 &&
+        rect.y >= window.innerHeight * 0.5 &&
+        rect.x >= window.innerWidth * 0.45 &&
+        !blocked.test(label)
+      )
+      .sort((a, b) => (b.rect.x + b.rect.y) - (a.rect.x + a.rect.y));
+    const target = candidates[0]?.button;
+    if (!target) return false;
+    target.click();
+    return true;
+  }).catch(() => false);
 }
 
 async function countUserMessages() {
@@ -265,23 +318,27 @@ async function waitForPromptSent(box, beforeUserMessages) {
     if (afterUserMessages > beforeUserMessages) return true;
     await page.waitForTimeout(400);
   }
-
   const text = (await getPromptBoxText(box)).trim();
   if (!text) {
-    throw new Error("입력창은 비었지만 ChatGPT 대화에 새 메시지가 생기지 않았습니다. 전송 버튼 클릭이 실패했을 가능성이 큽니다.");
+    throw new Error("Input became empty, but no new user message appeared in ChatGPT.");
   }
   return false;
 }
 
 async function submitPrompt(prompt) {
   const box = await findPromptBox();
-  if (!box) throw new Error("ChatGPT 입력창을 찾지 못했습니다.");
   const beforeUserMessages = await countUserMessages();
-  await fillPromptBox(box, prompt);
+  if (box) {
+    await fillPromptBox(box, prompt);
+  } else {
+    const clicked = await clickPromptCoordinateFallback();
+    if (!clicked) throw new Error("ChatGPT input box was not found.");
+    await typePromptText(prompt);
+  }
   await page.waitForTimeout(700);
   await clickSend();
   const sent = await waitForPromptSent(box, beforeUserMessages);
-  if (!sent) throw new Error("ChatGPT 대화에 새 사용자 메시지가 생기지 않았습니다.");
+  if (!sent) throw new Error("No new user message appeared in ChatGPT.");
 }
 
 async function countStopButtons() {
@@ -301,13 +358,13 @@ async function waitUntilGenerationSettles(index, total) {
   while (Date.now() - start < 240000) {
     await waitIfPaused();
     const elapsed = Math.floor((Date.now() - start) / 1000);
-    progressMessage = `프롬프트 ${index}/${total} 이미지 생성 대기 중 (${elapsed}초)`;
+    progressMessage = `Prompt ${index}/${total} waiting for image generation (${elapsed}s)`;
     const stopVisible = await countStopButtons();
     if (!stopVisible) {
       stableChecks += 1;
       if (elapsed > 20 && stableChecks >= 3) return true;
       if (elapsed >= 90) {
-        log(`프롬프트 ${index} 자동 대기 90초 경과. 다음 프롬프트로 진행합니다.`);
+        log(`Prompt ${index} waited 90s. Moving to next prompt.`);
         return true;
       }
     } else {
@@ -319,10 +376,10 @@ async function waitUntilGenerationSettles(index, total) {
 }
 
 async function runAutomation({ projectName, prompts }) {
-  if (running) throw new Error("이미 실행 중입니다.");
+  if (running) throw new Error("Already running.");
   running = true;
   paused = false;
-  progressMessage = "작업 시작";
+  progressMessage = "Starting";
   currentLog = [];
 
   const safeProject = sanitize(projectName);
@@ -331,72 +388,59 @@ async function runAutomation({ projectName, prompts }) {
   await fs.writeFile(path.join(projectDir, "prompts.txt"), prompts.join("\n\n"), "utf8");
 
   try {
-    await openChatGpt();
-    if (!isChatGptUrl(page.url())) {
-      throw new Error("ChatGPT 탭에 연결되지 않았습니다.");
-    }
+    const result = await ensureChatGptPage();
+    if (!result.found) throw new Error("ChatGPT tab is not connected.");
 
     for (let i = 0; i < prompts.length; i++) {
       await waitIfPaused();
-      setProgress(`프롬프트 ${i + 1}/${prompts.length} 입력 및 전송 중`);
+      setProgress(`Prompt ${i + 1}/${prompts.length} typing and sending`);
       await submitPrompt(prompts[i]);
-      setProgress(`프롬프트 ${i + 1}/${prompts.length} 이미지 생성 대기 중`);
+      setProgress(`Prompt ${i + 1}/${prompts.length} waiting for image generation`);
       const settled = await waitUntilGenerationSettles(i + 1, prompts.length);
-      if (!settled) log(`프롬프트 ${i + 1} 대기 시간 초과`);
-      setProgress(`프롬프트 ${i + 1}/${prompts.length} 완료. 다운로드는 진행하지 않습니다.`);
+      if (!settled) log(`Prompt ${i + 1} timed out.`);
+      setProgress(`Prompt ${i + 1}/${prompts.length} done. No download.`);
       await page.waitForTimeout(2000);
     }
 
-    setProgress(`작업 완료. 저장 폴더: ${projectDir}`);
+    setProgress(`Done. Output folder: ${projectDir}`);
     await fs.writeFile(path.join(projectDir, "log.txt"), currentLog.slice().reverse().join("\n"), "utf8");
   } finally {
     running = false;
     paused = false;
-    progressMessage = "대기 중";
+    progressMessage = "Idle";
   }
 }
-
-app.post("/api/open-chatgpt", async (_req, res) => {
-  try {
-    await openChatGpt();
-    res.json({ ok: true, url: page.url(), usingCdp: connectedByCdp });
-  } catch (error) {
-    res.status(500).json({ ok: false, error: error.message });
-  }
-});
 
 app.get("/api/check-chatgpt", async (_req, res) => {
   try {
     const status = await getConnectionStatus();
     res.json({ ok: true, ...status });
   } catch (error) {
+    resetBrowserRefs();
     res.status(500).json({ ok: false, error: error.message });
   }
 });
 
 app.post("/api/run", async (req, res) => {
   const prompts = (req.body.prompts || []).map((value) => String(value || "").trim()).filter(Boolean).slice(0, maxPrompts);
-  if (!prompts.length) return res.status(400).json({ ok: false, error: "프롬프트가 없습니다." });
-  runAutomation({
-    projectName: req.body.projectName,
-    prompts
-  }).catch((error) => log(`오류: ${error.message}`));
+  if (!prompts.length) return res.status(400).json({ ok: false, error: "No prompts." });
+  runAutomation({ projectName: req.body.projectName, prompts }).catch((error) => log(`ERROR: ${error.message}`));
   res.json({ ok: true });
 });
 
 app.post("/api/pause", (_req, res) => {
   if (!running) return res.json({ ok: true, running, paused });
   paused = true;
-  progressMessage = "일시 중지";
-  log("일시 중지했습니다. 재시작을 누르면 다음 단계부터 계속 진행합니다.");
+  progressMessage = "Paused";
+  log("Paused.");
   res.json({ ok: true, running, paused });
 });
 
 app.post("/api/resume", (_req, res) => {
   if (!running) return res.json({ ok: true, running, paused });
   paused = false;
-  progressMessage = "재시작";
-  log("재시작했습니다.");
+  progressMessage = "Resumed";
+  log("Resumed.");
   res.json({ ok: true, running, paused });
 });
 
