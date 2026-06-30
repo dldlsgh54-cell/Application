@@ -8,6 +8,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const outputRoot = path.join(rootDir, "ShortsAutoOutput");
 const profileDir = path.join(rootDir, ".chatgpt-profile");
+const maxPrompts = 20;
+const chromePaths = [
+  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
+];
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -36,27 +43,43 @@ async function ensureBrowser() {
   if (browserContext) return browserContext;
   await fs.mkdir(outputRoot, { recursive: true });
   const launchOptions = {
-    channel: process.env.BROWSER_CHANNEL || "chrome",
+    channel: process.env.BROWSER_CHANNEL || "msedge",
     headless: false,
     acceptDownloads: true,
     viewport: { width: 1280, height: 900 },
     downloadsPath: outputRoot
   };
-  try {
-    browserContext = await chromium.launchPersistentContext(profileDir, launchOptions);
-  } catch (error) {
-    if (launchOptions.channel === "chrome") {
-      browserContext = await chromium.launchPersistentContext(profileDir, {
-        ...launchOptions,
-        channel: "msedge"
-      });
-    } else {
-      throw error;
-    }
-  }
+  browserContext = await launchInstalledBrowser(launchOptions);
   page = browserContext.pages()[0] || await browserContext.newPage();
   page.setDefaultTimeout(10000);
   return browserContext;
+}
+
+async function launchInstalledBrowser(launchOptions) {
+  try {
+    return await chromium.launchPersistentContext(profileDir, launchOptions);
+  } catch (edgeError) {
+    try {
+      return await chromium.launchPersistentContext(profileDir, {
+        ...launchOptions,
+        channel: "chrome"
+      });
+    } catch {
+      for (const executablePath of chromePaths) {
+        try {
+          await fs.access(executablePath);
+          return await chromium.launchPersistentContext(profileDir, {
+            ...launchOptions,
+            channel: undefined,
+            executablePath
+          });
+        } catch {
+          // Try next installed browser path.
+        }
+      }
+      throw edgeError;
+    }
+  }
 }
 
 async function openChatGpt() {
@@ -169,7 +192,7 @@ async function runAutomation({ projectName, prompts, batchMode }) {
     await openChatGpt();
     if (batchMode) {
       const combined = buildBatchPrompt(prompts);
-      log("6장 한 번에 생성용 통합 프롬프트 전송");
+      log(`${prompts.length}장 한 번에 생성용 통합 프롬프트 전송`);
       await submitPrompt(combined);
       await waitUntilGenerationSettles();
       await tryDownloadLatestImages(projectDir, 0);
@@ -193,9 +216,10 @@ async function runAutomation({ projectName, prompts, batchMode }) {
 }
 
 function buildBatchPrompt(prompts) {
+  const count = prompts.length;
   return [
-    "아래 6개의 이미지 프롬프트를 각각 독립된 이미지로 생성해줘.",
-    "반드시 한 장에 6컷을 합치지 말고, 01부터 06까지 별도의 이미지 6장으로 만들어줘.",
+    `아래 ${count}개의 이미지 프롬프트를 각각 독립된 이미지로 생성해줘.`,
+    `반드시 한 장에 ${count}컷을 합치지 말고, 01부터 ${String(count).padStart(2, "0")}까지 별도의 이미지 ${count}장으로 만들어줘.`,
     "모든 이미지는 쇼츠용 9:16 세로 비율로 만들어줘.",
     "",
     ...prompts.map((prompt, index) => `Image ${String(index + 1).padStart(2, "0")}:\n${prompt}`)
@@ -212,7 +236,7 @@ app.post("/api/open-chatgpt", async (_req, res) => {
 });
 
 app.post("/api/run", async (req, res) => {
-  const prompts = (req.body.prompts || []).map((value) => String(value || "").trim()).filter(Boolean).slice(0, 6);
+  const prompts = (req.body.prompts || []).map((value) => String(value || "").trim()).filter(Boolean).slice(0, maxPrompts);
   if (!prompts.length) return res.status(400).json({ ok: false, error: "프롬프트가 없습니다." });
   runAutomation({
     projectName: req.body.projectName,

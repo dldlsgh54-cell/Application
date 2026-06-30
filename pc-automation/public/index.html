@@ -36,7 +36,7 @@
   <main>
     <header>
       <h1>쇼츠 이미지 자동생성 PC</h1>
-      <p>API 없이 PC 브라우저에서 ChatGPT를 열고 프롬프트를 입력합니다. 처음 실행 시 열린 브라우저에서 ChatGPT 로그인만 해두세요.</p>
+      <p>API 없이 PC Edge 브라우저에서 ChatGPT를 열고 프롬프트를 입력합니다. 처음 실행 시 열린 브라우저에서 ChatGPT 로그인만 해두세요.</p>
     </header>
 
     <section>
@@ -46,9 +46,9 @@
 
     <section>
       <label for="sourceText">프롬프트 전체 붙여넣기</label>
-      <textarea id="sourceText" class="source" placeholder="컷1: ...&#10;&#10;컷2: ...&#10;&#10;또는 Prompt 1: ..."></textarea>
+      <textarea id="sourceText" class="source" placeholder="컷1: ...&#10;&#10;컷2: ...&#10;&#10;또는 Prompt 1: ...&#10;&#10;최대 20개까지 가능합니다."></textarea>
       <div class="controls">
-        <button id="splitBtn" type="button">프롬프트 1~6 자동 분리</button>
+        <button id="splitBtn" type="button">프롬프트 1~20 자동 분리</button>
         <button id="openBtn" class="secondary" type="button">ChatGPT 로그인/열기</button>
       </div>
     </section>
@@ -56,7 +56,7 @@
     <section class="row">
       <div class="option">
         <input id="batchMode" type="checkbox" checked>
-        <label for="batchMode" style="margin:0;">6장을 한 번에 요청</label>
+        <label for="batchMode" style="margin:0;">전체 이미지를 한 번에 요청</label>
       </div>
       <div class="controls" style="margin:0;">
         <button id="runBtn" type="button">프로그램 실행</button>
@@ -76,7 +76,8 @@
   </main>
 
   <script>
-    const prompts = Array(6).fill("");
+    const maxPrompts = 20;
+    const prompts = Array(maxPrompts).fill("");
     const $ = (id) => document.getElementById(id);
     const grid = $("promptGrid");
 
@@ -86,7 +87,7 @@
       const lines = text.split("\n");
       const blocks = [];
       let current = "";
-      const label = /^(?:#{1,6}\s*)?(?:컷|프롬프트|prompt|cut)?\s*([1-6])\s*(?:[\).:\-]|번)?\s*(.*)$/i;
+      const label = /^(?:#{1,6}\s*)?(?:컷|프롬프트|prompt|cut|image)?\s*([1-9]|1[0-9]|20)\s*(?:[\).:\-]|번)?\s*(.*)$/i;
       const flush = () => {
         const value = current.trim();
         if (value) blocks.push(value);
@@ -99,7 +100,7 @@
           continue;
         }
         const match = line.match(label);
-        const isLabel = match && (/컷|프롬프트|prompt|cut/i.test(line) || /^[1-6]\s*[\).:\-]/.test(line));
+        const isLabel = match && (/컷|프롬프트|prompt|cut|image/i.test(line) || /^([1-9]|1[0-9]|20)\s*[\).:\-]/.test(line));
         if (isLabel) {
           flush();
           current = (match[2] || "").trim();
@@ -108,10 +109,10 @@
         }
       }
       flush();
-      if (blocks.length) return blocks.slice(0, 6);
+      if (blocks.length) return blocks.slice(0, maxPrompts);
       const paragraphs = text.split(/\n\s*\n/).map(v => v.trim()).filter(Boolean);
-      if (paragraphs.length >= 2) return paragraphs.slice(0, 6);
-      return lines.map(v => v.trim().replace(/^[-*]\s*/, "")).filter(v => v.length >= 8).slice(0, 6);
+      if (paragraphs.length >= 2) return paragraphs.slice(0, maxPrompts);
+      return lines.map(v => v.trim().replace(/^[-*]\s*/, "")).filter(v => v.length >= 8).slice(0, maxPrompts);
     }
 
     function render() {
