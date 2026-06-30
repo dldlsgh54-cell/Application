@@ -35,11 +35,11 @@ jobs:
         with:
           gradle-version: "8.7"
 
-      - name: Build release APK
+      - name: Build APKs
         shell: bash
         run: |
           set +e
-          gradle :app:assembleRelease --stacktrace 2>&1 | tee build.log
+          gradle :app:assembleDebug :app:assembleRelease --stacktrace 2>&1 | tee build.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
             grep -E -i "(^e: |error:|FAILURE:|What went wrong|Execution failed|Could not|Unresolved reference|Cannot access|A failure occurred)" build.log > build-error-lines.txt || true
@@ -55,19 +55,17 @@ jobs:
             exit "$status"
           fi
 
-      - name: Rename APK
+      - name: Prepare APK files
         run: |
-          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
-            cp app/build/outputs/apk/release/app-release.apk shorts-auto-release.apk
-          else
-            cp app/build/outputs/apk/release/app-release-unsigned.apk shorts-auto-release.apk
-          fi
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/shorts-auto-debug.apk
+          cp app/build/outputs/apk/release/app-release.apk dist/shorts-auto-release.apk
 
-      - name: Upload APK artifact
+      - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: shorts-auto-release-apk
-          path: shorts-auto-release.apk
+          name: shorts-auto-apks
+          path: dist/*.apk
 
       - name: Upload build log
         if: always()
@@ -80,14 +78,13 @@ jobs:
             build-error-lines.txt
 
       - name: Publish latest APK release
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git tag -f apk-latest
-          git push -f origin apk-latest
           gh release delete apk-latest --yes || true
-          gh release create apk-latest shorts-auto-release.apk \
+          gh release create apk-latest dist/shorts-auto-release.apk dist/shorts-auto-debug.apk \
             --title "Latest APK" \
-            --notes "최신 APK입니다. 폰에서 shorts-auto-release.apk를 다운로드해 설치하세요." \
+            --notes "최신 APK입니다. 먼저 shorts-auto-release.apk를 설치해 보세요. 막히면 shorts-auto-debug.apk도 제공됩니다." \
             --prerelease \
             --latest
