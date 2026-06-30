@@ -24,6 +24,7 @@
     .log { white-space: pre-wrap; background: #101828; color: #f9fafb; border-radius: 8px; padding: 12px; min-height: 150px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; overflow: auto; }
     .option { display: flex; align-items: center; gap: 8px; color: #344054; font-weight: 600; }
     .option input { width: auto; }
+    .status { color: #0f766e; font-weight: 700; }
     @media (max-width: 760px) {
       main { padding: 14px; }
       .grid { grid-template-columns: 1fr; }
@@ -36,7 +37,7 @@
   <main>
     <header>
       <h1>쇼츠 이미지 자동생성 PC</h1>
-      <p>API 없이 PC Edge 브라우저에서 ChatGPT를 열고 프롬프트를 입력합니다. 처음 실행 시 열린 브라우저에서 ChatGPT 로그인만 해두세요.</p>
+      <p>API 없이 PC Edge 브라우저에서 ChatGPT를 열고 프롬프트를 입력합니다. 이미 열려 있는 ChatGPT 탭이 연결되면 그 마지막 창에서 바로 시작합니다.</p>
     </header>
 
     <section>
@@ -49,8 +50,10 @@
       <textarea id="sourceText" class="source" placeholder="컷1: ...&#10;&#10;컷2: ...&#10;&#10;또는 Prompt 1: ...&#10;&#10;최대 20개까지 가능합니다."></textarea>
       <div class="controls">
         <button id="splitBtn" type="button">프롬프트 1~20 자동 분리</button>
+        <button id="checkBtn" class="secondary" type="button">ChatGPT 연결 확인</button>
         <button id="openBtn" class="secondary" type="button">ChatGPT 로그인/열기</button>
       </div>
+      <p id="connectStatus" class="status" style="margin-top:10px;">아직 연결 확인 전입니다.</p>
     </section>
 
     <section class="row">
@@ -150,13 +153,28 @@
         alert("프롬프트를 찾지 못했습니다.");
         return;
       }
+      prompts.fill("");
       parsed.forEach((prompt, index) => prompts[index] = prompt);
       render();
     });
 
+    $("checkBtn").addEventListener("click", async () => {
+      try {
+        const res = await fetch("/api/check-chatgpt");
+        const json = await res.json();
+        if (!res.ok || json.ok === false) throw new Error(json.error || "연결 확인 실패");
+        $("connectStatus").textContent = `${json.message} ${json.usingCdp ? "(기존 Edge 연결)" : "(자동화용 Edge)"}`;
+        if (json.connected) alert(`연결됨\n${json.title || "ChatGPT"}\n${json.url}`);
+      } catch (error) {
+        $("connectStatus").textContent = error.message;
+        alert(error.message);
+      }
+    });
+
     $("openBtn").addEventListener("click", async () => {
       try {
-        await post("/api/open-chatgpt");
+        const json = await post("/api/open-chatgpt");
+        $("connectStatus").textContent = `ChatGPT 열기 완료: ${json.url}`;
       } catch (error) {
         alert(error.message);
       }
