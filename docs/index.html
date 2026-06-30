@@ -194,7 +194,7 @@
 
     <section class="panel">
       <label for="sourceText">ChatGPT에서 받은 이미지 프롬프트 전체</label>
-      <textarea id="sourceText" placeholder="컷1: ...&#10;&#10;컷2: ...&#10;&#10;또는 Prompt 1: ... 형식으로 붙여넣으세요."></textarea>
+      <textarea id="sourceText" placeholder="컷1: ...&#10;&#10;이미지2: ...&#10;&#10;Prompt3: ... 형식으로 붙여넣으세요."></textarea>
       <div class="controls">
         <button id="pasteBtn" type="button">클립보드 붙여넣기</button>
         <button id="splitBtn" type="button">프롬프트 1~6 자동 분리</button>
@@ -256,29 +256,31 @@
       const lines = text.split("\n");
       const blocks = [];
       let current = "";
-      const label = /^(?:#{1,6}\s*)?(?:컷|프롬프트|prompt|cut)?\s*([1-6])\s*(?:[\).:\-]|번)?\s*(.*)$/i;
+      let activeBlock = false;
+      const label = /^(?:#{1,6}\s*)?(?:컷|이미지|프롬프트|prompt|cut|image)\s*([1-6])\s*(?:[\).:\-]|번)?\s*(.*)$/i;
+      const numberLabel = /^([1-6])\s*[\).:\-]\s*(.*)$/;
 
       function flush() {
         const value = current.trim();
         if (value) blocks.push(value);
         current = "";
+        activeBlock = false;
       }
 
       for (const rawLine of lines) {
         const line = rawLine.trim();
         if (!line) {
-          if (current) current += "\n";
+          if (activeBlock && current) current += "\n";
           continue;
         }
         const match = line.match(label);
-        const isLabel = match && (
-          /컷|프롬프트|prompt|cut/i.test(line) ||
-          /^[1-6]\s*[\).:\-]/.test(line)
-        );
+        const numberMatch = line.match(numberLabel);
+        const isLabel = Boolean(match || numberMatch);
         if (isLabel) {
           flush();
-          current = (match[2] || "").trim();
-        } else if (current) {
+          activeBlock = true;
+          current = ((match && match[2]) || (numberMatch && numberMatch[2]) || "").trim();
+        } else if (activeBlock) {
           current += (current.endsWith("\n") ? "" : "\n") + line;
         }
       }

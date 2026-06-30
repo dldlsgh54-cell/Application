@@ -47,7 +47,7 @@
 
     <section>
       <label for="sourceText">프롬프트 전체 붙여넣기</label>
-      <textarea id="sourceText" class="source" placeholder="컷1: ...&#10;&#10;컷2: ...&#10;&#10;또는 Prompt 1: ...&#10;&#10;최대 20개까지 가능합니다."></textarea>
+      <textarea id="sourceText" class="source" placeholder="컷1: ...&#10;&#10;이미지2: ...&#10;&#10;Prompt3: ...&#10;&#10;최대 20개까지 가능합니다."></textarea>
       <div class="controls">
         <button id="splitBtn" type="button">프롬프트 1~20 자동 분리</button>
         <button id="checkBtn" class="secondary" type="button">ChatGPT 연결 확인</button>
@@ -90,24 +90,29 @@
       const lines = text.split("\n");
       const blocks = [];
       let current = "";
-      const label = /^(?:#{1,6}\s*)?(?:컷|프롬프트|prompt|cut|image)?\s*([1-9]|1[0-9]|20)\s*(?:[\).:\-]|번)?\s*(.*)$/i;
+      let activeBlock = false;
+      const label = /^(?:#{1,6}\s*)?(?:컷|이미지|프롬프트|prompt|cut|image)\s*([1-9]|1[0-9]|20)\s*(?:[\).:\-]|번)?\s*(.*)$/i;
+      const numberLabel = /^([1-9]|1[0-9]|20)\s*[\).:\-]\s*(.*)$/;
       const flush = () => {
         const value = current.trim();
         if (value) blocks.push(value);
         current = "";
+        activeBlock = false;
       };
       for (const rawLine of lines) {
         const line = rawLine.trim();
         if (!line) {
-          if (current) current += "\n";
+          if (activeBlock && current) current += "\n";
           continue;
         }
         const match = line.match(label);
-        const isLabel = match && (/컷|프롬프트|prompt|cut|image/i.test(line) || /^([1-9]|1[0-9]|20)\s*[\).:\-]/.test(line));
+        const numberMatch = line.match(numberLabel);
+        const isLabel = Boolean(match || numberMatch);
         if (isLabel) {
           flush();
-          current = (match[2] || "").trim();
-        } else if (current) {
+          activeBlock = true;
+          current = ((match && match[2]) || (numberMatch && numberMatch[2]) || "").trim();
+        } else if (activeBlock) {
           current += (current.endsWith("\n") ? "" : "\n") + line;
         }
       }
