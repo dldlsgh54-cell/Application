@@ -1,19 +1,14 @@
 package com.example.shortsauto
 
-import android.Manifest
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -64,10 +59,6 @@ class MainActivity : ComponentActivity() {
         detectClipboardPrompts(showToast = true, force = false)
     }
 
-    private val requestPermissions = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { }
-
     private val progressReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != ChatGptAutomationService.BROADCAST_PROGRESS) return
@@ -84,7 +75,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        ensureRequiredPermissions()
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboardManager?.addPrimaryClipChangedListener(clipboardListener)
         setContent {
@@ -117,7 +107,6 @@ class MainActivity : ComponentActivity() {
                     onParseClipboard = { parseClipboardPrompts() },
                     onReadScreenText = { readScreenTextPrompts() },
                     onOpenAccessibility = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-                    onOpenAllFiles = { openAllFilesSettings() },
                     onDismissCompletion = { showCompletionDialog = false }
                 )
             }
@@ -151,21 +140,6 @@ class MainActivity : ComponentActivity() {
             isRunning = false
             showCompletionDialog = true
         }
-    }
-
-    private fun ensureRequiredPermissions() {
-        val permissions = mutableListOf<String>()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions += Manifest.permission.POST_NOTIFICATIONS
-            permissions += Manifest.permission.READ_MEDIA_IMAGES
-        } else {
-            permissions += Manifest.permission.READ_EXTERNAL_STORAGE
-            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) permissions += Manifest.permission.WRITE_EXTERNAL_STORAGE
-        }
-        val missing = permissions.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
-        if (missing.isNotEmpty()) requestPermissions.launch(missing.toTypedArray())
     }
 
     private fun startAutomation() {
@@ -286,14 +260,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun openAllFilesSettings() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
-            val uri = Uri.parse("package:$packageName")
-            startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri))
-        } else {
-            Toast.makeText(this, "현재 저장 권한 설정이 필요하지 않습니다.", Toast.LENGTH_SHORT).show()
-        }
-    }
 }
 
 @Composable
@@ -322,7 +288,6 @@ fun AppUi(
     onParseClipboard: () -> Unit,
     onReadScreenText: () -> Unit,
     onOpenAccessibility: () -> Unit,
-    onOpenAllFiles: () -> Unit,
     onDismissCompletion: () -> Unit
 ) {
     Scaffold { innerPadding ->
@@ -382,9 +347,6 @@ fun AppUi(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = onOpenFolder, modifier = Modifier.weight(1f)) { Text("저장 폴더 열기") }
                 OutlinedButton(onClick = onOpenAccessibility, modifier = Modifier.weight(1f)) { Text("접근성 설정") }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = onOpenAllFiles, modifier = Modifier.weight(1f)) { Text("저장 권한") }
             }
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),

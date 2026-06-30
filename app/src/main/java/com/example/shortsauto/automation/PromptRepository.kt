@@ -2,7 +2,6 @@ package com.example.shortsauto.automation
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.os.Environment
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -16,9 +15,7 @@ object PromptRepository {
     }
 
     fun rootDir(context: Context): File {
-        val publicRoot = Environment.getExternalStorageDirectory()
-        val root = File(publicRoot, "ShortsAuto")
-        return if (root.mkdirs() || root.exists()) root else File(context.getExternalFilesDir(null), "ShortsAuto")
+        return File(context.getExternalFilesDir(null), "ShortsAuto").apply { mkdirs() }
     }
 
     fun projectDir(context: Context, projectName: String): File {

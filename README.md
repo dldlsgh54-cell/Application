@@ -24,10 +24,10 @@ Kotlin, Jetpack Compose, Accessibility Service, Foreground Service로 만든 And
 
 ## 저장 구조
 
-가능하면 외부 저장소 루트 아래에 저장합니다.
+앱 전용 외부 폴더 아래에 저장합니다. 별도 전체 파일 접근 권한은 사용하지 않습니다.
 
 ```text
-/ShortsAuto/
+/Android/data/com.example.shortsauto/files/ShortsAuto/
   /프로젝트명/
     01.png
     02.png
@@ -39,8 +39,6 @@ Kotlin, Jetpack Compose, Accessibility Service, Foreground Service로 만든 And
     log.txt
 ```
 
-저장소 정책 때문에 루트 쓰기가 막히는 기기에서는 앱 전용 외부 폴더의 `ShortsAuto/프로젝트명`으로 fallback 됩니다.
-
 ## 실행 방법
 
 1. Android Studio에서 이 폴더를 엽니다.
@@ -48,11 +46,10 @@ Kotlin, Jetpack Compose, Accessibility Service, Foreground Service로 만든 And
    - `gradlew.bat`는 wrapper jar가 없을 때 포함된 `gradle.zip`을 풀어 Gradle 8.7로 실행합니다.
 3. 실제 Android 기기에 설치합니다. Accessibility 자동화와 스크린샷 때문에 실제 기기 테스트를 권장합니다.
 4. 앱에서 `접근성 설정`을 눌러 `쇼츠 이미지 자동생성 접근성 서비스`를 켭니다.
-5. Android 11 이상에서 `/ShortsAuto` 루트 저장이 필요하면 앱의 `저장 권한` 버튼을 눌러 전체 파일 접근 권한을 허용합니다.
-6. ChatGPT에서 이미지 프롬프트 6개를 복사합니다.
-7. 이 앱으로 돌아오면 클립보드를 자동 감지하고 프롬프트 1~6 입력칸에 자동 분리합니다.
-8. 복사 방식이 어려우면 ChatGPT 화면을 열어 둔 상태에서 앱의 `화면 텍스트 읽기`를 누릅니다.
-9. `시작`을 누르면 ChatGPT 앱 또는 웹이 열리고 이미지 자동 생성이 진행됩니다.
+5. ChatGPT에서 이미지 프롬프트 6개를 복사합니다.
+6. 이 앱으로 돌아오면 클립보드를 자동 감지하고 프롬프트 1~6 입력칸에 자동 분리합니다.
+7. 복사 방식이 어려우면 ChatGPT 화면을 열어 둔 상태에서 앱의 `화면 텍스트 읽기`를 누릅니다.
+8. `시작`을 누르면 ChatGPT 앱 또는 웹이 열리고 이미지 자동 생성이 진행됩니다.
 
 ## 프롬프트 가져오기 우선순위
 

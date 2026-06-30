@@ -13,3 +13,6 @@ gradle.zip
 captures/
 .externalNativeBuild/
 .cxx/
+actions-log/
+build-log-artifact/
+*.zip
