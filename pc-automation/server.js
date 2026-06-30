@@ -263,16 +263,14 @@ async function runAutomation({ projectName, prompts, batchMode }) {
       log(`${prompts.length}개 이미지를 한 번에 요청합니다.`);
       await submitPrompt(combined);
       await waitUntilGenerationSettles();
-      await tryDownloadLatestImages(projectDir, 0);
-      log("통합 생성 완료. 자동 다운로드가 안 되면 브라우저에서 직접 저장하세요.");
+      log("통합 생성 완료. 이미지 다운로드는 진행하지 않습니다.");
     } else {
       for (let i = 0; i < prompts.length; i++) {
         log(`프롬프트 ${i + 1}/${prompts.length} 전송`);
         await submitPrompt(prompts[i]);
         const settled = await waitUntilGenerationSettles();
         if (!settled) log(`프롬프트 ${i + 1} 대기 시간 초과`);
-        const downloaded = await tryDownloadLatestImages(projectDir, i);
-        log(downloaded ? `프롬프트 ${i + 1} 이미지 다운로드 시도 완료` : `프롬프트 ${i + 1} 자동 다운로드 버튼 미감지`);
+        log(`프롬프트 ${i + 1} 이미지 생성 요청 완료. 다운로드는 진행하지 않습니다.`);
         await page.waitForTimeout(2000);
       }
     }
